@@ -72,6 +72,25 @@ function csrf_verify(?string $token): bool
     return is_string($token) && isset($_SESSION['csrf']) && hash_equals($_SESSION['csrf'], $token);
 }
 
+/**
+ * Respuesta JSON estándar para peticiones fetch: {"estado": bool, "mensaje": string, ...$extra}
+ * Termina la ejecución. Ej: json_response(true, 'Guardado', ['id' => 5], 201);
+ */
+function json_response(bool $estado, string $mensaje = '', array $extra = [], int $codigo = 200): void
+{
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
+    http_response_code($codigo);
+    header('Content-Type: application/json; charset=utf-8');
+    header('X-Content-Type-Options: nosniff');
+    echo json_encode(
+        ['estado' => $estado, 'mensaje' => $mensaje] + $extra,
+        JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE
+    );
+    exit;
+}
+
 /** Renderiza views/{$vista}.php dentro del layout. Ej: render('eventos/index', ['eventos' => $x]) */
 function render(string $vista, array $datos = [], int $codigo = 200): void
 {
