@@ -1,58 +1,23 @@
 'use strict';
 
 /**
- * Plantilla de módulo AJAX: Tabulator (listado) + modal (crear/editar) + fetch/FormData + SweetAlert2.
- * Las URLs vienen de data-* en la vista (nada quemado). Depende de assets/js/app.js (window.App).
+ * Módulo de eventos. Un solo script para dos vistas:
+ *  - eventos/index : listado con Tabulator + buscador
+ *  - eventos/crear : formulario (fetch + FormData + SweetAlert2)
+ * Las URLs vienen de data-* en la vista. Depende de assets/js/app.js (window.App).
  */
 document.addEventListener('DOMContentLoaded', () => {
-    const raiz = document.getElementById('eventos-app');
-    if (!raiz) return;
-
-    const esAdmin = raiz.dataset.esAdmin === '1';
-    const urls = {
-        listar: raiz.dataset.urlListar,
-        obtener: raiz.dataset.urlObtener,
-        guardar: raiz.dataset.urlGuardar,
-        eliminar: raiz.dataset.urlEliminar,
-    };
-
+    const contenedor = document.getElementById('tabla-eventos');
     const form = document.getElementById('formEvento');
-    const modalEl = document.getElementById('modalEvento');
-    const modal = modalEl ? bootstrap.Modal.getOrCreateInstance(modalEl) : null;
-    const btnGuardar = document.getElementById('btnGuardar');
-    const tituloModal = document.getElementById('tituloModal');
+    if (contenedor) iniciarListado(contenedor);
+    if (form) iniciarFormulario(form);
+});
 
-    const fmtFecha = (v) => (v ? v.split('-').reverse().join('/') : '');
+const fmtFecha = (v) => (v ? v.split('-').reverse().join('/') : '');
 
-    // ---------- Tabulator ----------
-    const columnas = [
-        { title: 'Código', field: 'codigo', width: 120 },
-        { title: 'Nombre', field: 'nombre', minWidth: 180 },
-        { title: 'Lugar', field: 'lugar', minWidth: 140 },
-        { title: 'Fecha', field: 'fecha', width: 120, formatter: (c) => fmtFecha(c.getValue()) },
-        { title: 'Hora', field: 'hora', width: 90, formatter: (c) => (c.getValue() || '').slice(0, 5) },
-        {
-            title: 'Cupo', field: 'cupo_disponible', width: 100, hozAlign: 'center', sorter: 'number',
-            formatter: (c) => {
-                const n = Number(c.getValue()) || 0;
-                return `<span class="badge text-bg-${n > 0 ? 'success' : 'danger'}">${n}</span>`;
-            },
-        },
-    ];
-
-    if (esAdmin) {
-        columnas.push({
-            title: 'Acciones', hozAlign: 'center', width: 120, headerSort: false,
-            formatter: (c) => {
-                const id = Number(c.getRow().getData().id);
-                return `<button type="button" class="btn btn-sm btn-outline-primary me-1" data-accion="editar" data-id="${id}" title="Editar"><i class="bi bi-pencil"></i></button>`
-                    + `<button type="button" class="btn btn-sm btn-outline-danger" data-accion="eliminar" data-id="${id}" title="Eliminar"><i class="bi bi-trash"></i></button>`;
-            },
-        });
-    }
-
-    const tabla = new Tabulator('#tabla-eventos', {
-        ajaxURL: urls.listar,
+function iniciarListado(contenedor) {
+    const tabla = new Tabulator(contenedor, {
+        ajaxURL: contenedor.dataset.urlListar,
         ajaxConfig: { method: 'GET', headers: { Accept: 'application/json' } },
         ajaxResponse: (url, params, resp) => {
             if (!resp.estado) {
@@ -76,7 +41,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 },
             },
         },
-        columns: columnas,
+        columns: [
+            { title: 'Código', field: 'codigo', width: 120 },
+            { title: 'Nombre', field: 'nombre', minWidth: 180 },
+            { title: 'Lugar', field: 'lugar', minWidth: 140 },
+            { title: 'Fecha', field: 'fecha', width: 120, formatter: (c) => fmtFecha(c.getValue()) },
+            { title: 'Hora', field: 'hora', width: 90, formatter: (c) => (c.getValue() || '').slice(0, 5) },
+            {
+                title: 'Cupo', field: 'cupo_disponible', width: 100, hozAlign: 'center', sorter: 'number',
+                formatter: (c) => {
+                    const n = Number(c.getValue()) || 0;
+                    return `<span class="badge text-bg-${n > 0 ? 'success' : 'danger'}">${n}</span>`;
+                },
+            },
+        ],
     });
 
     tabla.on('dataLoaded', (data) => {
@@ -97,26 +75,12 @@ document.addEventListener('DOMContentLoaded', () => {
             { field: 'lugar', type: 'like', value: v },
         ]]);
     });
+}
 
-    if (!esAdmin) return;
+function iniciarFormulario(form) {
+    const btn = document.getElementById('btnGuardar');
 
-    // ---------- Modal crear / editar ----------
-    function abrirModal(evento = null) {
-        form.reset();
-        form.classList.remove('was-validated');
-        form.elements.id.value = evento ? evento.id : '';
-        tituloModal.textContent = evento ? 'Editar evento' : 'Nuevo evento';
-        if (evento) {
-            ['codigo', 'nombre', 'lugar', 'fecha', 'descripcion', 'cupo_disponible'].forEach((k) => {
-                form.elements[k].value = evento[k] ?? '';
-            });
-            form.elements.hora.value = (evento.hora || '').slice(0, 5);
-        }
-        modal.show();
-    }
-
-    document.getElementById('btnNuevo').addEventListener('click', () => abrirModal());
-
+    // El código siempre en mayúsculas
     form.elements.codigo.addEventListener('input', (e) => {
         e.target.value = e.target.value.toUpperCase();
     });
@@ -127,39 +91,19 @@ document.addEventListener('DOMContentLoaded', () => {
             form.classList.add('was-validated');
             return;
         }
-        btnGuardar.disabled = true;
-        const r = await App.post(urls.guardar, new FormData(form));
-        btnGuardar.disabled = false;
-        App.toast(r.estado, r.mensaje);
+        btn.disabled = true;
+        const r = await App.post(form.dataset.urlGuardar, new FormData(form));
+
         if (r.estado) {
-            modal.hide();
-            tabla.setData(); // vuelve a pedir el listado al servidor
-        }
-    });
-
-    // ---------- Acciones de la tabla (delegación de eventos) ----------
-    document.getElementById('tabla-eventos').addEventListener('click', async (e) => {
-        const btn = e.target.closest('[data-accion]');
-        if (!btn) return;
-        const id = btn.dataset.id;
-
-        if (btn.dataset.accion === 'editar') {
-            const r = await App.get(`${urls.obtener}&id=${encodeURIComponent(id)}`);
-            if (!r.estado) return App.toast(false, r.mensaje);
-            abrirModal(r.datos);
+            App.toast(true, r.mensaje);
+            setTimeout(() => { window.location.href = form.dataset.urlIndex; }, 1200);
             return;
         }
-
-        const ok = await App.confirmar({
-            titulo: '¿Eliminar evento?',
-            texto: 'También se eliminarán sus inscripciones y asistencias. Esta acción no se puede deshacer.',
-            boton: 'Sí, eliminar',
-        });
-        if (!ok) return;
-        const datos = new FormData();
-        datos.append('id', id);
-        const r = await App.post(urls.eliminar, datos);
-        App.toast(r.estado, r.mensaje);
-        if (r.estado) tabla.setData();
+        btn.disabled = false;
+        if (r.errores) {
+            Swal.fire({ icon: 'error', title: 'Revisa los datos', text: r.mensaje });
+        } else {
+            App.toast(false, r.mensaje);
+        }
     });
-});
+}

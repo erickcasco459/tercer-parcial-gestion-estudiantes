@@ -2,12 +2,11 @@
 declare(strict_types=1);
 
 /**
- * Controlador de eventos: coordina, valida y responde. Sin SQL ni HTML.
- *   GET  index.php?c=evento&a=index     -> vista
- *   GET  index.php?c=evento&a=listar    -> JSON (Tabulator)
- *   GET  index.php?c=evento&a=obtener&id=N
- *   POST index.php?c=evento&a=guardar   -> crea (id vacío) o actualiza
- *   POST index.php?c=evento&a=eliminar
+ * Controlador de eventos: valida, coordina y responde. Sin SQL ni HTML.
+ *   GET  index.php?c=evento&a=index    -> vista del listado (cualquier usuario autenticado)
+ *   GET  index.php?c=evento&a=listar   -> JSON para Tabulator
+ *   GET  index.php?c=evento&a=crear    -> vista del formulario (solo admin)
+ *   POST index.php?c=evento&a=guardar  -> crea el evento, JSON (solo admin)
  */
 final class EventoController extends BaseController
 {
@@ -39,23 +38,13 @@ final class EventoController extends BaseController
         }
     }
 
-    public function obtener(): void
+    public function crear(): void
     {
-        $this->exigirLogin(true);
-        $id = filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT);
-        if (!$id || $id < 1) {
-            json_response(false, 'Identificador inválido.', [], 422);
-        }
-        try {
-            $evento = $this->eventos->obtener($id);
-        } catch (PDOException $e) {
-            error_log($e->getMessage());
-            json_response(false, 'No se pudo consultar el evento.', [], 500);
-        }
-        if ($evento === null) {
-            json_response(false, 'El evento no existe.', [], 404);
-        }
-        json_response(true, '', ['datos' => $evento]);
+        $this->exigirAdmin();
+        render('eventos/crear', [
+            'tituloPagina' => 'Nuevo evento',
+            'scripts'      => ['assets/js/eventos.js'],
+        ]);
     }
 
     public function guardar(): void
@@ -64,49 +53,24 @@ final class EventoController extends BaseController
         $this->exigirAdmin(true);
         $this->exigirCsrf();
 
-        $id = (int) $this->inputPost('id');
         [$datos, $errores] = $this->validar();
         if ($errores !== []) {
             json_response(false, implode(' ', $errores), ['errores' => $errores], 422);
         }
 
         try {
-            if ($this->eventos->existeCodigo($datos['codigo'], $id > 0 ? $id : null)) {
+            if ($this->eventos->existeCodigo($datos['codigo'])) {
                 json_response(false, 'Ya existe un evento con ese código.', [], 409);
             }
-            if ($id > 0) {
-                if ($this->eventos->obtener($id) === null) {
-                    json_response(false, 'El evento no existe.', [], 404);
-                }
-                $this->eventos->actualizar($id, $datos);
-                json_response(true, 'Evento actualizado correctamente.', ['id' => $id]);
-            }
-            $nuevoId = $this->eventos->crear($datos);
-            json_response(true, 'Evento creado correctamente.', ['id' => $nuevoId], 201);
+            $id = $this->eventos->crear($datos);
+            json_response(true, 'Evento creado correctamente.', ['id' => $id], 201);
         } catch (PDOException $e) {
+            // 23000 = violación de UNIQUE (código repetido por una petición simultánea)
+            if ((string) $e->getCode() === '23000') {
+                json_response(false, 'Ya existe un evento con ese código.', [], 409);
+            }
             error_log($e->getMessage());
             json_response(false, 'No se pudo guardar el evento.', [], 500);
-        }
-    }
-
-    public function eliminar(): void
-    {
-        $this->exigirPost();
-        $this->exigirAdmin(true);
-        $this->exigirCsrf();
-
-        $id = (int) $this->inputPost('id');
-        if ($id < 1) {
-            json_response(false, 'Identificador inválido.', [], 422);
-        }
-        try {
-            if (!$this->eventos->eliminar($id)) {
-                json_response(false, 'El evento no existe.', [], 404);
-            }
-            json_response(true, 'Evento eliminado correctamente.');
-        } catch (PDOException $e) {
-            error_log($e->getMessage());
-            json_response(false, 'No se pudo eliminar el evento.', [], 500);
         }
     }
 
@@ -134,11 +98,13 @@ final class EventoController extends BaseController
             $errores[] = 'La descripción no puede superar 2000 caracteres.';
         }
 
+        // Fecha real (rechaza 2026-02-31)
         $f = DateTime::createFromFormat('!Y-m-d', $fecha);
         if ($f === false || $f->format('Y-m-d') !== $fecha) {
             $errores[] = 'La fecha no es válida.';
         }
 
+        // Hora HH:MM o HH:MM:SS -> se guarda como HH:MM:00
         if (!preg_match('/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/', $hora)) {
             $errores[] = 'La hora no es válida.';
             $hora = '';
@@ -146,7 +112,11 @@ final class EventoController extends BaseController
             $hora = substr($hora, 0, 5) . ':00';
         }
 
-        $cupo = filter_var($this->inputPost('cupo_disponible'), FILTER_VALIDATE_INT, ['options' => ['min_range' => 0]]);
+        $cupo = filter_var(
+            $this->inputPost('cupo_disponible'),
+            FILTER_VALIDATE_INT,
+            ['options' => ['min_range' => 0]]
+        );
         if ($cupo === false) {
             $errores[] = 'El cupo debe ser un número entero mayor o igual a 0.';
             $cupo = 0;
