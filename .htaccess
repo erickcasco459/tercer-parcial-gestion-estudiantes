@@ -1,0 +1,7 @@
+# Bloquea el acceso web a archivos sensibles (Apache / Alwaysdata)
+<FilesMatch "^(\.env.*|.*\.sql|\.gitignore)$">
+    Require all denied
+</FilesMatch>
+
+# Código interno: solo se ejecuta a través de index.php (la app debe estar en la raíz del sitio)
+RedirectMatch 404 ^/(config|models|controllers|views|\.git)(/|$)
